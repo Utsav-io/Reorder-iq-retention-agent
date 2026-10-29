@@ -1,0 +1,246 @@
+{
+  "name": "WF-05 AI Brief",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "62fab58d-09b8-4438-9be5-66257449f81d",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT * FROM experiment_results ORDER BY result_id DESC LIMIT 1;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "51f484e2-ae15-4091-98f6-afce5e4305e2",
+      "name": "Get Latest Results",
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash",
+          "mode": "list",
+          "cachedResultName": "Gemini 3.5 Flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a retention analytics assistant. The data is SYNTHETIC and illustrative. Use ONLY the numbers provided and never invent figures. Do not recommend discounts. Every action requires human approval.\nReturn ONLY valid JSON, with no markdown, using these keys: observed_evidence (string), hypothesis (string), recommended_action (string), rationale (string), target_metric (string), guardrail_metrics (array of strings), estimated_cost (string), assumptions (array of strings), confidence_level (\"low\", \"medium\" or \"high\"), required_approval (string), policy_checks (array of strings), missing_data (array of strings).\nExperiment results: {{ JSON.stringify($('Get Latest Results').first().json) }}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        448,
+        0
+      ],
+      "id": "72a8a3a9-17b7-401b-91cd-348f602fb635",
+      "name": "AI brief",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "vqS2RnWux8bU72wy",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "const item = $input.first().json;\nlet raw = item.content?.parts?.[0]?.text ?? item.text ?? item.output ?? JSON.stringify(item);\nraw = String(raw).replace(/json|/g, '').trim();\nlet ok = true, brief;\ntry { brief = JSON.parse(raw); } catch (e) { ok = false; brief = { error: 'parse_failed', raw: raw }; }\nreturn [{ json: { experiment_id: 'EXP-001', brief: JSON.stringify(brief), parse_ok: ok } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        0
+      ],
+      "id": "bc379c6f-1ccb-4944-907f-6ca52148394a",
+      "name": "Parse Brief"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "ai_briefs",
+          "mode": "list",
+          "cachedResultName": "ai_briefs"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {
+            "parse_ok": false
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "brief_id",
+              "displayName": "brief_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "experiment_id",
+              "displayName": "experiment_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "brief",
+              "displayName": "brief",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "object",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "parse_ok",
+              "displayName": "parse_ok",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "boolean",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "approval_status",
+              "displayName": "approval_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1040,
+        0
+      ],
+      "id": "3e20b120-3e91-430a-98e1-74dafbfe09a2",
+      "name": "Save Brief",
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get Latest Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get Latest Results": {
+      "main": [
+        [
+          {
+            "node": "AI brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI brief": {
+      "main": [
+        [
+          {
+            "node": "Parse Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Brief": {
+      "main": [
+        [
+          {
+            "node": "Save Brief",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8a859166-c6ee-4294-abc7-094a020ce478",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "82ebab087802ae91ba365334a856c7b31baaf5ae8126330ca2e193595211e6b2"
+  },
+  "nodeGroups": [],
+  "id": "NwLE1i5i8NOZTESy",
+  "tags": []
+}

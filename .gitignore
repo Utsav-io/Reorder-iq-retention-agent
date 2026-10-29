@@ -1,0 +1,17 @@
+# Secrets and local config: never commit these
+.env
+*.env
+.env.*
+credentials*.json
+*secret*
+*apikey*
+
+# Local database and tooling
+*.log
+*.sqlite
+*.bak
+pgdata/
+.DS_Store
+Thumbs.db
+.dbeaver/
+.vscode/

@@ -1,0 +1,64 @@
+{
+  "name": "WF-04 Measure Results",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "e8ef7fab-e114-473d-816e-867d9d62134b",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH w AS (\n  SELECT start_at FROM campaigns WHERE campaign_id = 'CMP-001'\n),\ncust AS (\n  SELECT a.customer_id, a.variant,\n         COUNT(o.order_id) AS orders,\n         COALESCE(SUM(o.gross_order_value - o.discount_amount - o.variable_cost), 0) AS contribution\n  FROM experiment_assignments a\n  CROSS JOIN w\n  LEFT JOIN orders o\n    ON o.customer_id = a.customer_id\n   AND o.order_status = 'completed'\n   AND o.order_timestamp > w.start_at\n  WHERE a.experiment_id = 'EXP-001'\n  GROUP BY a.customer_id, a.variant\n),\ng AS (\n  SELECT variant,\n         COUNT(*)::numeric AS n,\n         AVG((orders > 0)::int)::numeric AS p,\n         AVG(contribution)::numeric AS m,\n         COALESCE(STDDEV_SAMP(contribution), 0)::numeric AS sd\n  FROM cust GROUP BY variant\n),\nt AS (SELECT * FROM g WHERE variant = 'treatment'),\nc AS (SELECT * FROM g WHERE variant = 'control'),\ncost AS (\n  SELECT COUNT(*) * 0.05 AS campaign_cost\n  FROM campaign_events\n  WHERE experiment_id = 'EXP-001' AND event_type = 'sent'\n)\nINSERT INTO experiment_results\n (experiment_id, n_treatment, n_control,\n  reorder_rate_treatment_pct, reorder_rate_control_pct,\n  lift_pp, lift_ci_low_pp, lift_ci_high_pp,\n  incremental_orders,\n  contrib_per_customer_treatment, contrib_per_customer_control,\n  incr_contrib_per_customer, incr_contrib_ci_low, incr_contrib_ci_high,\n  campaign_cost, net_incremental_contribution, note)\nSELECT 'EXP-001', t.n, c.n,\n  ROUND(100*t.p, 2), ROUND(100*c.p, 2),\n  ROUND(100*(t.p - c.p), 2),\n  ROUND(100*((t.p - c.p) - 1.96*SQRT(t.p*(1-t.p)/t.n + c.p*(1-c.p)/c.n)), 2),\n  ROUND(100*((t.p - c.p) + 1.96*SQRT(t.p*(1-t.p)/t.n + c.p*(1-c.p)/c.n)), 2),\n  ROUND((t.p - c.p) * t.n, 2),\n  ROUND(t.m, 2), ROUND(c.m, 2),\n  ROUND(t.m - c.m, 2),\n  ROUND((t.m - c.m) - 1.96*SQRT(t.sd^2/t.n + c.sd^2/c.n), 2),\n  ROUND((t.m - c.m) + 1.96*SQRT(t.sd^2/t.n + c.sd^2/c.n), 2),\n  ROUND(cost.campaign_cost, 2),\n  ROUND((t.m - c.m) * t.n - cost.campaign_cost, 2),\n  'SYNTHETIC illustrative data. Simulated outcomes. 14-day window. Message cost 0.05 AED/send is an assumption.'\nFROM t, c, cost\nRETURNING *;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "6ae40bce-2e3b-4b34-bb04-01dd99c5f937",
+      "name": "Measure Incremental Results",
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Measure Incremental Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "63db9ec4-86d1-41f0-8e23-7baf3aad63a7",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "82ebab087802ae91ba365334a856c7b31baaf5ae8126330ca2e193595211e6b2"
+  },
+  "nodeGroups": [],
+  "id": "td9FupEhJTfywDhX",
+  "tags": []
+}

@@ -1,0 +1,414 @@
+{
+  "name": "WF-01 Data & opportunity detection",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "ad02c18a-d56a-4363-823d-b4a4121a56e0",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH stats AS (\n  SELECT c.customer_id,\n         c.market,\n         c.loyalty_tier,\n         c.consent_status,\n         COUNT(o.order_id) FILTER (WHERE o.order_timestamp >= now() - interval '60 days')  AS orders_recent_60,\n         COUNT(o.order_id) FILTER (WHERE o.order_timestamp <  now() - interval '60 days'\n                                     AND o.order_timestamp >= now() - interval '120 days') AS orders_prior_60,\n         ROUND(AVG(o.gross_order_value), 2)                                               AS avg_order_value,\n         EXTRACT(DAY FROM now() - MAX(o.order_timestamp))::int                             AS days_since_last_order\n  FROM customers c\n  LEFT JOIN orders o\n         ON o.customer_id = c.customer_id AND o.order_status = 'completed'\n  GROUP BY c.customer_id, c.market, c.loyalty_tier, c.consent_status\n)\nSELECT *,\n       CASE\n         WHEN consent_status = 'opted_out' THEN 'excluded_no_consent'\n         WHEN orders_prior_60 >= 6 AND orders_recent_60 <= orders_prior_60 * 0.5 THEN 'at_risk'\n         WHEN orders_prior_60 >= 6 THEN 'healthy'\n         ELSE 'low_history'\n       END AS segment\nFROM stats\nORDER BY customer_id;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "5b37d91d-248d-4023-9e87-9476818ea133",
+      "name": "Calculate customer metrics",
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 4
+          },
+          "conditions": [
+            {
+              "id": "fa0d435a-b8c2-4884-b027-9dba90612238",
+              "leftValue": "={{ $json.segment }}",
+              "rightValue": "at_risk",
+              "operator": {
+                "type": "string",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2.4,
+      "position": [
+        448,
+        0
+      ],
+      "id": "a888022e-9599-428e-a551-e9c5f53023dc",
+      "name": "Keep at_risk only"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Next-best-action policy v1 (matches blueprint: reminder first, no discount by default)\nreturn $input.all().map(item => {\n  const c = item.json;\n  const days = Number(c.days_since_last_order);\n\n  let action, reason;\n\n  if (c.consent_status !== 'opted_in') {\n    action = 'no_action';\n    reason = 'Consent missing - hard stop';\n  } else if (days <= 7) {\n    action = 'no_action';\n    reason = 'Ordered recently - suppress from win-back';\n  } else {\n    action = 'personalized_reminder';\n    reason = 'Previously frequent, order rate declining';\n  }\n\n  return {\n    json: {\n      ...c,\n      next_action: action,\n      reason: reason,\n      discount_pct: 0,\n      expected_discount_cost: 0,\n      policy_version: 'v1',\n      approval_status: 'pending_approval'\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "3484fcd8-3bbf-4bb5-a431-ebaea8bfc86b",
+      "name": "Decide Next Best Action"
+    },
+    {
+      "parameters": {
+        "modelId": {
+          "__rl": true,
+          "value": "models/gemini-3.5-flash",
+          "mode": "list",
+          "cachedResultName": "Gemini 3.5 Flash"
+        },
+        "messages": {
+          "values": [
+            {
+              "content": "=You are a retention analyst for a food-delivery app. Explain the decision below in one short sentence for an internal dashboard. Do not invent facts or numbers.\n\nCustomer: {{ $json.customer_id }} ({{ $json.market }}, {{ $json.loyalty_tier }} tier)\nOrders in last 60 days: {{ $json.orders_recent_60 }}\nOrders in the 60 days before that: {{ $json.orders_prior_60 }}\nDays since last order: {{ $json.days_since_last_order }}\nDecision: {{ $json.next_action }} with {{ $json.discount_pct }}% discount\n\nReply with only JSON in this exact format:\n{\"explanation\": \"<one sentence>\"}"
+            }
+          ]
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.googleGemini",
+      "typeVersion": 1.2,
+      "position": [
+        1120,
+        0
+      ],
+      "id": "22e33d28-03b0-47f0-9850-a873b26d18eb",
+      "name": "AI EXPLAIN DECISION",
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googlePalmApi": {
+          "id": "vqS2RnWux8bU72wy",
+          "name": "Google Gemini(PaLM) Api account"
+        }
+      },
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "maxItems": 3
+      },
+      "type": "n8n-nodes-base.limit",
+      "typeVersion": 1,
+      "position": [
+        896,
+        0
+      ],
+      "id": "c96f43d0-1d3e-4da0-b035-8223b5293009",
+      "name": "Test Limit",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pull the explanation out of Gemini's reply and re-attach the customer data\nconst base = $('Test Limit').all();\n\nreturn $input.all().map((item, i) => {\n  const parts = (item.json.content && item.json.content.parts) || [];\n  const textPart = parts.find(p => typeof p.text === 'string');\n  let raw = textPart ? textPart.text : '';\n\n  // remove json fences\n  raw = raw.replace(/json/gi, '').replace(/```/g, '').trim();\n\n  let explanation;\n  let parse_ok = true;\n  try {\n    explanation = JSON.parse(raw).explanation;\n  } catch (e) {\n    parse_ok = false;\n    explanation = 'AI output could not be parsed';\n  }\n\n  return { json: { ...base[i].json, explanation, parse_ok } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1488,
+        0
+      ],
+      "id": "f266a4db-824a-4e0d-b57c-3598d56836e2",
+      "name": "Parse AI Output",
+      "disabled": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Keep only the fields that exist as columns in action_recommendations\nreturn $input.all().map(item => {\n  const c = item.json;\n  return {\n    json: {\n      customer_id: c.customer_id,\n      segment: c.segment,\n      next_action: c.next_action,\n      reason: c.reason,\n      discount_pct: c.discount_pct,\n      expected_discount_cost: c.expected_discount_cost,\n      explanation: c.explanation,\n      policy_version: c.policy_version,\n      approval_status: c.approval_status\n    }\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        0
+      ],
+      "id": "8c64d12b-86f1-4432-9c6c-0423e838a99f",
+      "name": "Shape For Database"
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "mode": "list",
+          "value": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "action_recommendations",
+          "mode": "list",
+          "cachedResultName": "action_recommendations"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "recommendation_id",
+              "displayName": "recommendation_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "customer_id",
+              "displayName": "customer_id",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "segment",
+              "displayName": "segment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "next_action",
+              "displayName": "next_action",
+              "required": true,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "reason",
+              "displayName": "reason",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "discount_pct",
+              "displayName": "discount_pct",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "expected_discount_cost",
+              "displayName": "expected_discount_cost",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "number",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "explanation",
+              "displayName": "explanation",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "policy_version",
+              "displayName": "policy_version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "approval_status",
+              "displayName": "approval_status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "created_at",
+              "displayName": "created_at",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "dateTime",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1936,
+        0
+      ],
+      "id": "63f2e272-f35e-4c0b-a16d-403a962c3e86",
+      "name": "Save Recommendations",
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Calculate customer metrics",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Calculate customer metrics": {
+      "main": [
+        [
+          {
+            "node": "Keep at_risk only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Keep at_risk only": {
+      "main": [
+        [
+          {
+            "node": "Decide Next Best Action",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide Next Best Action": {
+      "main": [
+        [
+          {
+            "node": "Test Limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI EXPLAIN DECISION": {
+      "main": [
+        [
+          {
+            "node": "Parse AI Output",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Test Limit": {
+      "main": [
+        [
+          {
+            "node": "AI EXPLAIN DECISION",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse AI Output": {
+      "main": [
+        [
+          {
+            "node": "Shape For Database",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Shape For Database": {
+      "main": [
+        [
+          {
+            "node": "Save Recommendations",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "8bf153f0-79b6-4ab9-b5a4-1dbdbef26a28",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "82ebab087802ae91ba365334a856c7b31baaf5ae8126330ca2e193595211e6b2"
+  },
+  "nodeGroups": [],
+  "id": "0wO9i1gzgbZwcJu3",
+  "tags": []
+}

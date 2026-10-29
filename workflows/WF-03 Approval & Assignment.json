@@ -1,0 +1,97 @@
+{
+  "name": "WF-03 Approval & Assignment",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        0
+      ],
+      "id": "449945c8-9360-4c5a-81ed-efe6322a01ce",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO experiment_assignments\n  (experiment_id, customer_id, variant, eligibility_snapshot, assignment_key)\nSELECT\n  'EXP-001',\n  r.customer_id,\n  CASE WHEN get_byte(decode(md5('EXP-001:' || r.customer_id), 'hex'), 0) % 2 = 0\n       THEN 'treatment' ELSE 'control' END,\n  jsonb_build_object(\n    'next_action', r.next_action,\n    'segment', r.segment,\n    'policy_version', r.policy_version,\n    'consent_status', c.consent_status),\n  md5('EXP-001:' || r.customer_id)\nFROM action_recommendations r\nJOIN customers c ON c.customer_id = r.customer_id\nWHERE r.approval_status = 'approved'\n  AND r.next_action = 'personalized_reminder'\n  AND c.consent_status = 'opted_in'\nON CONFLICT (experiment_id, customer_id) DO NOTHING\nRETURNING customer_id, variant, assignment_key;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "096866a4-ac4a-44ef-873f-00aedba92077",
+      "name": "Assign Treatment/Control",
+      "alwaysOutputData": true,
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "WITH t AS (\n  SELECT customer_id FROM experiment_assignments\n  WHERE experiment_id = 'EXP-001' AND variant = 'treatment'\n),\ns AS (\n  INSERT INTO campaign_events (campaign_id, experiment_id, customer_id, event_type, message_variant)\n  SELECT 'CMP-001', 'EXP-001', customer_id, 'sent', 'reminder_v1' FROM t\n  ON CONFLICT DO NOTHING RETURNING customer_id\n),\nd AS (\n  INSERT INTO campaign_events (campaign_id, experiment_id, customer_id, event_type, message_variant)\n  SELECT 'CMP-001', 'EXP-001', customer_id, 'delivered', 'reminder_v1' FROM s WHERE random() < 0.97\n  ON CONFLICT DO NOTHING RETURNING customer_id\n),\no AS (\n  INSERT INTO campaign_events (campaign_id, experiment_id, customer_id, event_type, message_variant)\n  SELECT 'CMP-001', 'EXP-001', customer_id, 'opened', 'reminder_v1' FROM d WHERE random() < 0.40\n  ON CONFLICT DO NOTHING RETURNING customer_id\n),\nc AS (\n  INSERT INTO campaign_events (campaign_id, experiment_id, customer_id, event_type, message_variant)\n  SELECT 'CMP-001', 'EXP-001', customer_id, 'clicked', 'reminder_v1' FROM o WHERE random() < 0.25\n  ON CONFLICT DO NOTHING RETURNING customer_id\n)\nSELECT (SELECT COUNT(*) FROM s) AS sent,\n       (SELECT COUNT(*) FROM d) AS delivered,\n       (SELECT COUNT(*) FROM o) AS opened,\n       (SELECT COUNT(*) FROM c) AS clicked;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        0
+      ],
+      "id": "5512be19-765b-44ac-b19d-876d73e226ea",
+      "name": "Log Sandbox Delivery",
+      "credentials": {
+        "postgres": {
+          "id": "9LHdXp0fGat1urGY",
+          "name": "Postgres account"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Assign Treatment/Control",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign Treatment/Control": {
+      "main": [
+        [
+          {
+            "node": "Log Sandbox Delivery",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "5462daf5-4b55-44d9-96ad-616b980f4719",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "82ebab087802ae91ba365334a856c7b31baaf5ae8126330ca2e193595211e6b2"
+  },
+  "nodeGroups": [],
+  "id": "sKd31yu06AbMgf8D",
+  "tags": []
+}
