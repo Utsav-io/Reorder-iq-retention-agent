@@ -87,4 +87,4 @@ See `docs/` for the full project report (problem, method, results, governance an
 
 ## Author
 
-Utsav. [LinkedIn](https://linkedin.com/in/utsav--pathak) 
+Utsav Pathak. [LinkedIn](https://linkedin.com/in/utsav--pathak) 
